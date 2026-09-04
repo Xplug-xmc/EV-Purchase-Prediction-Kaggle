@@ -229,3 +229,116 @@ baseline_auc = roc_auc_score(
 )
 
 print(f"\n Baseline ROC-AUC: {baseline_auc:.5f}")
+
+print("\n")
+# BUILD A CATBOOST MODEL
+cat_model = CatBoostClassifier(
+    iterations= 500,
+    learning_rate= 0.05,
+    depth= 6,
+    loss_function= "Logloss",
+    eval_metric= "AUC",
+    random_seed= 42,
+    verbose= 100
+)
+
+
+# BUILD THE MODEL
+cat_model.fit(
+    X_train,
+    Y_train,
+    cat_features= categorical_features,
+    eval_set= (X_test, Y_test),
+    early_stopping_rounds= 50
+)
+
+
+# MAKE PROBABILITY PREDICTIONS
+cat_predictions = cat_model.predict_proba(X_test)[:, 1]
+
+
+# CALCULATE ROC-AUC
+cat_auc = roc_auc_score(
+    Y_test,
+    cat_predictions
+)
+
+print(f"\n CatBoost ROC-AUC: {cat_auc:.5f}")
+
+
+# COMPARE THE MODELS
+print(f"\n MODEL COMPARISON")
+print("--------------------")
+print(f"Logistic Regression: {baseline_auc:.5f}")
+print(f"CatBoost:            {cat_auc:.5f}")
+
+
+# INSPECT THE IMPORTANT FEATURES USING CATBOOST
+feature_importance = pd.DataFrame({
+    "Feature": X.columns,
+    "Importance": cat_model.feature_importances_
+})
+
+feature_importance = feature_importance.sort_values(
+    "Importance",
+    ascending=False
+)
+
+
+print(f"\n Feature Importance")
+print("--------------------------")
+print(feature_importance)
+
+
+# INVESTIGATE THE STRONGEST FEATURES
+# Purchase rate by subsidy
+subsidy_rate = train.groupby("Subsidy_Available")["Will_Buy_EV"].apply(
+    lambda x: (x == "Yes").mean()
+)
+
+print(f"\n EV Purchase Rate by Subsidy:")
+print(subsidy_rate)
+
+
+# Purchase rate by range anxiety
+range_rate = train.groupby("Range_Anxiety_Level")["Will_Buy_EV"].apply(
+    lambda x: (x == "Yes").mean()
+)
+
+print(f"\nEV Purchase Rate by Range Anxiety:")
+print(range_rate)
+
+
+# Purchase rate by environmental concern
+environment_rate = train.groupby(
+    "Environmental_Concern_Level"
+)["Will_Buy_EV"].apply(
+    lambda x: (x == "Yes").mean()
+)
+
+print(f"\nEV Purchase Rate by Environmental Concern:")
+print(environment_rate)
+
+
+# Purchase rate by home charging
+charging_rate = train.groupby(
+    "Home_Charging_Possible"
+)["Will_Buy_EV"].apply(
+    lambda x: (x == "Yes").mean()
+)
+
+print(f"\nEV Purchase Rate by Home Charging:")
+print(charging_rate)
+
+
+# INVESTIGATE COMBINATIONS
+combo_rate = train.groupby(
+    ["Subsidy_Available", "Environmental_Concern_Level"]
+)["Will_Buy_EV"].apply(
+    lambda x: (x == "Yes").mean()
+)
+
+
+print(f"\n Combination Rate")
+print("-----------------------")
+print(combo_rate)
