@@ -342,3 +342,41 @@ combo_rate = train.groupby(
 print(f"\n Combination Rate")
 print("-----------------------")
 print(combo_rate)
+
+
+print("\n")
+#IMPROVE CATBOOST PROPERLY
+cat_model_1000 = CatBoostClassifier(
+    iterations=1000,
+    learning_rate=0.05,
+    depth=6,
+    loss_function="Logloss",
+    eval_metric="AUC",
+    random_seed=42,
+    verbose=200
+)
+
+cat_model_1000.fit(
+    X_train,
+    Y_train,
+    cat_features=categorical_features,
+    eval_set=(X_test, Y_test),
+    early_stopping_rounds=100
+)
+
+predictions_1000 = cat_model_1000.predict_proba(X_test)[:, 1]
+
+auc_1000 = roc_auc_score(
+    Y_test,
+    predictions_1000
+)
+
+print(f"CatBoost 1000 iterations ROC-AUC: {auc_1000:.5f}")
+
+
+#COMPARE THE MODELS
+print(f"\n MODEL COMPARISON")
+print("-----------------------------")
+print(f"Logistic Regression: {baseline_auc:.5f}")
+print(f"CatBoost 500:        {cat_auc:.5f}")
+print(f"CatBoost 1000:       {auc_1000:.5f}")
