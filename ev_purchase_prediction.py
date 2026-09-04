@@ -8,6 +8,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder,OneHotEncoder, StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
@@ -139,7 +141,6 @@ print(Y.shape)
 
 
 #SEPARATE NUMERICAL AND CATEGORICAL FEATURES
-#NUMERICAL FEATURES
 numeric_features = [
     "Age",
     "Annual_Income_USD",
@@ -150,7 +151,6 @@ numeric_features = [
     "Environmental_Concern_Level"
 ]
 
-#CATEGORICAL FEATURES
 categorical_features = [
     "Gender",
     "City_Type",
@@ -194,3 +194,38 @@ y = train["Will_Buy_EV"].map({
 print(f"\n FIRST FIVE TARGET ROWS")
 print("----------------------------------")
 print(y.head())
+
+
+# PREPARE THE DATA FOR LOGISTIC REGRESSION USING ONE-HOT ENCODING
+preprocessor = ColumnTransformer(transformers=[(
+    "num",
+    StandardScaler(),
+    numeric_features ),
+
+(
+    "cat",
+    OneHotEncoder(handle_unknown= "ignore"),
+    categorical_features
+)])
+
+
+#CREATE THE LOGISTIC REGRESSION PIPELINE
+model = Pipeline([
+    ("preprocessor", preprocessor),
+    ("classifier", LogisticRegression( max_iter= 1000))
+])
+
+
+# TRAIN THE MODEL
+model.fit(X_train, Y_train)
+
+# MAKE PROBABILITY PREDICTION
+test_predictions = model.predict_proba(X_test)[:, 1]
+
+# EVALUATE USING ROC-AUC
+baseline_auc = roc_auc_score(
+    Y_test,
+    test_predictions
+)
+
+print(f"\n Baseline ROC-AUC: {baseline_auc:.5f}")
