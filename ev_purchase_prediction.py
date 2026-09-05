@@ -231,7 +231,12 @@ baseline_auc = roc_auc_score(
 print(f"\n Baseline ROC-AUC: {baseline_auc:.5f}")
 
 print("\n")
+
+
 # BUILD A CATBOOST MODEL
+print(f"CATBOOST INTERATIONS = 500 EXPERIMENT")
+print("-----------------------------------------")
+
 cat_model = CatBoostClassifier(
     iterations= 500,
     learning_rate= 0.05,
@@ -347,6 +352,9 @@ print(combo_rate)
 print("\n")
 
 #IMPROVE CATBOOST EXPERIMENTS
+print(f"CATBOOST INTERATIONS = 1000 EXPERIMENT")
+print("---------------------------------------------")
+
 cat_model_1000 = CatBoostClassifier(
     iterations=1000,
     learning_rate=0.05,
@@ -357,6 +365,7 @@ cat_model_1000 = CatBoostClassifier(
     verbose=200
 )
 
+# BUILD THE MODEL
 cat_model_1000.fit(
     X_train,
     Y_train,
@@ -365,8 +374,10 @@ cat_model_1000.fit(
     early_stopping_rounds=100
 )
 
+# MAKE PROBABILITY PREDICTIONS
 predictions_1000 = cat_model_1000.predict_proba(X_test)[:, 1]
 
+# CALCULATE ROC-AUC
 auc_1000 = roc_auc_score(
     Y_test,
     predictions_1000
@@ -387,6 +398,9 @@ print("\n")
 
 
 # TEST CATBOOST DEPTH FROM 6 TO 8
+print(f"TEST CATBOOST DEPTH FROM 6 TO 8 EXPERIMENT")
+print("-------------------------------------------------")
+
 cat_model_depth8 = CatBoostClassifier(
     iterations=1000,
     learning_rate=0.05,
@@ -397,6 +411,7 @@ cat_model_depth8 = CatBoostClassifier(
     verbose=200
 )
 
+# BUILD THE MODEL
 cat_model_depth8.fit(
     X_train,
     Y_train,
@@ -405,8 +420,10 @@ cat_model_depth8.fit(
     early_stopping_rounds=100
 )
 
+# MAKE PROBABILITY PREDICTIONS
 predictions_depth8 = cat_model_depth8.predict_proba(X_test)[:, 1]
 
+# CALCULATE ROC-AUC
 auc_depth8 = roc_auc_score(
     Y_test,
     predictions_depth8
@@ -430,6 +447,8 @@ print("\n")
 # Learning rate = 0.03
 # Iterations = 2000
 # Depth = 6
+print(f"TEST CATBOOST DEPTH 6 + LEARNING RATE 0.03 + INTERATIONS = 2000")
+print("------------------------------------------------------------------")
 
 cat_model_lr03 = CatBoostClassifier(
     iterations=2000,
@@ -441,6 +460,7 @@ cat_model_lr03 = CatBoostClassifier(
     verbose=200
 )
 
+# BUILD THE MODEL
 cat_model_lr03.fit(
     X_train,
     Y_train,
@@ -449,8 +469,10 @@ cat_model_lr03.fit(
     early_stopping_rounds=100
 )
 
+# MAKE PROBABILITY PREDICTIONS
 predictions_lr03 = cat_model_lr03.predict_proba(X_test)[:, 1]
 
+# CALCULATE ROC-AUC
 auc_lr03 = roc_auc_score(
     Y_test,
     predictions_lr03
@@ -469,3 +491,174 @@ print(f"CatBoost Depth 8:                 {auc_depth8:.5f}")
 print(f"CatBoost Depth 6,LR 0.03:         {auc_lr03:.5f}")
 
 
+
+# FEATURE ENGINEERING EXPERIMENTS
+print(f" FEATURE ENGINEERING EXPERIMENTS")
+print("-----------------------------------")
+
+# Income per Car
+train["Income_Per_Car"] = (
+    train["Annual_Income_USD"] /
+    (train["Number_of_Cars_Owned"] + 1)
+)
+
+test["Income_Per_Car"] = (
+    test["Annual_Income_USD"] /
+    (test["Number_of_Cars_Owned"] + 1)
+)
+
+
+# Total Charging Availability
+train["Total_Charging_Access"] = (
+    train["Charging_Stations_Near_Home"] +
+    train["Charging_Stations_Near_Work"]
+)
+
+test["Total_Charging_Access"] = (
+    test["Charging_Stations_Near_Home"] +
+    test["Charging_Stations_Near_Work"]
+)
+
+
+# Commute Relative to Charging Access
+train["Commute_per_Charging"] = (
+    train["Daily_Commute_km"] /
+    (train["Total_Charging_Access"] + 1)
+)
+
+test["Commute_per_Charging"] = (
+    test["Daily_Commute_km"] /
+    (test["Total_Charging_Access"] + 1)
+)
+
+
+# Income + Environmental Concern
+train["Income_Environmental_Score"] = (
+    train["Annual_Income_USD"] *
+    train["Environmental_Concern_Level"]
+)
+
+test["Income_Environmental_Score"] = (
+    test["Annual_Income_USD"] *
+    test["Environmental_Concern_Level"]
+)
+
+
+# REBUILD X AND Y
+X_fe = train.drop(columns=["Will_Buy_EV", "id"])
+
+Y_fe = train["Will_Buy_EV"].map({
+    "No": 0,
+    "Yes": 1
+})
+
+
+# RECREATE TRAIN, TEST / SPLIT
+X_train_fe, X_test_fe, Y_train_fe, Y_test_fe = train_test_split(
+    X_fe,
+    Y_fe,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+
+print("\n")
+
+# BUILD NEW CATBOOST MODEL USING THE WINNING CATBOOST EXPERIMENT
+print(f" FEATURE ENGINEERING INTERATION = 2000, LR = 0.03 EXPERIMENT")
+print("----------------------------------------------------------------")
+
+cat_model_fe = CatBoostClassifier(
+    iterations=2000,
+    learning_rate=0.03,
+    depth=6,
+    loss_function="Logloss",
+    eval_metric="AUC",
+    random_seed=42,
+    verbose=200
+)
+
+
+# TRAIN THE NEW CATBOOST MODEL
+cat_model_fe.fit(
+    X_train_fe,
+    Y_train_fe,
+    cat_features=categorical_features,
+    eval_set=(X_test_fe, Y_test_fe),
+    early_stopping_rounds=100
+)
+
+
+# MAKE PROBABILITY PREDICTIONS
+predictions_fe = cat_model_fe.predict_proba(X_test_fe)[:, 1]
+
+
+# CALCULATE ROC-AUC
+auc_fe = roc_auc_score(
+    Y_test_fe,
+    predictions_fe
+)
+
+print(f"\n CatBoost with Feature Engineering ROC-AUC: {auc_fe:.5f}")
+
+
+# COMPARE THE MODELS
+print(f"\n MODEL COMPARISON")
+print("-------------------------")
+print(f"CatBoost 500:              {cat_auc:.5f}")
+print(f"CatBoost 1000:             {auc_1000:.5f}")
+print(f"CatBoost Depth 8:          {auc_depth8:.5f}")
+print(f"CatBoost LR 0.03:          {auc_lr03:.5f}")
+print(f"CatBoost + Feature Eng.:   {auc_fe:.5f}")
+
+
+print("\n")
+
+
+## CATBOOST EXPERIMENTS - L2 REGULARIZATION
+print(f"CATBOOST L2 REGULARIZATION EXPERIMENT")
+print("------------------------------------------")
+
+cat_model_l2 = CatBoostClassifier(
+    iterations=2000,
+    learning_rate=0.03,
+    depth=6,
+    l2_leaf_reg=5,
+    loss_function="Logloss",
+    eval_metric="AUC",
+    random_seed=42,
+    verbose=200
+)
+
+#BUILD THE MODEL
+cat_model_l2.fit(
+    X_train,
+    Y_train,
+    cat_features=categorical_features,
+    eval_set=(X_test, Y_test),
+    early_stopping_rounds=100
+)
+
+# MAKE PROBABILITY PREDICTIONS
+predictions_l2 = cat_model_l2.predict_proba(X_test)[:, 1]
+
+
+# CALCULATE ROC-AUC
+auc_l2 = roc_auc_score(
+    Y_test,
+    predictions_l2
+)
+
+print(f"CatBoost L2=5 ROC-AUC: {auc_l2:.5f}")
+
+
+# COMPARE THE MODELS
+print(f"\n MODEL COMPARISON")
+print("------------------------")
+print(f"CatBoost 500:        {cat_auc:.5f}")
+print(f"CatBoost 1000:       {auc_1000:.5f}")
+print(f"CatBoost Depth 8:    {auc_depth8:.5f}")
+print(f"CatBoost LR 0.03:    {auc_lr03:.5f}")
+print(f"Feature Engineering: {auc_fe:.5f}")
+print(f"CatBoost L2=5:       {auc_l2:.5f}")
