@@ -346,7 +346,7 @@ print(combo_rate)
 
 print("\n")
 
-#IMPROVE CATBOOST PROPERLY
+#IMPROVE CATBOOST EXPERIMENTS
 cat_model_1000 = CatBoostClassifier(
     iterations=1000,
     learning_rate=0.05,
@@ -422,3 +422,50 @@ print(f"Logistic Regression: {baseline_auc:.5f}")
 print(f"CatBoost 500:        {cat_auc:.5f}")
 print(f"CatBoost 1000:       {auc_1000:.5f}")
 print(f"CatBoost Depth 8:    {auc_depth8:.5f}")
+
+
+print("\n")
+
+# TEST CATBOOST DEPTH 6 + LEARNING RATE 0.03 + 2000 INTERATIONS
+# Learning rate = 0.03
+# Iterations = 2000
+# Depth = 6
+
+cat_model_lr03 = CatBoostClassifier(
+    iterations=2000,
+    learning_rate=0.03,
+    depth=6,
+    loss_function="Logloss",
+    eval_metric="AUC",
+    random_seed=42,
+    verbose=200
+)
+
+cat_model_lr03.fit(
+    X_train,
+    Y_train,
+    cat_features=categorical_features,
+    eval_set=(X_test, Y_test),
+    early_stopping_rounds=100
+)
+
+predictions_lr03 = cat_model_lr03.predict_proba(X_test)[:, 1]
+
+auc_lr03 = roc_auc_score(
+    Y_test,
+    predictions_lr03
+)
+
+print(f"\n CatBoost LR 0.03 ROC-AUC: {auc_lr03:.5f}")
+
+
+# COMPARE THE MODELS
+print(f"\n MODEL COMPARISON")
+print("------------------------")
+print(f"Logistic Regression:              {baseline_auc:.5f}")
+print(f"CatBoost 500:                     {cat_auc:.5f}")
+print(f"CatBoost 1000:                    {auc_1000:.5f}")
+print(f"CatBoost Depth 8:                 {auc_depth8:.5f}")
+print(f"CatBoost Depth 6,LR 0.03:         {auc_lr03:.5f}")
+
+
