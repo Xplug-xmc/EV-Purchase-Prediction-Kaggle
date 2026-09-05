@@ -750,3 +750,72 @@ print(f"Feature Engineering: {auc_fe:.5f}")
 print(f"CatBoost LR 0.03:    {auc_lr03:.5f}")
 print(f"CatBoost L2=5:       {auc_l2:.5f}")
 print(f"LightGBM:            {lgb_auc:.5f}")
+
+
+print("\n")
+
+#BLEND CATBOOST + LIGHTGBM
+print(f"BLEND CATBOOST + LIGHTGBM")
+print("-------------------------------")
+
+
+# 70/30 BLEND
+print(f"\n 70/30 BLEND")
+print("--------------")
+
+blend_70_30 = (
+    0.7 * cat_predictions +
+    0.3 * lgb_predictions
+)
+
+blend_auc_70_30 = roc_auc_score(
+    Y_test,
+    blend_70_30
+)
+
+print(f"CatBoost + LightGBM (70/30) ROC-AUC: {blend_auc_70_30:.5f}")
+
+
+# 50/50 BLEND
+print(f"\n 50/50 BLEND")
+print("---------------")
+
+blend_50_50 = (
+    0.5 * cat_predictions +
+    0.5 * lgb_predictions
+)
+
+blend_auc_50_50 = roc_auc_score(
+    Y_test,
+    blend_50_50
+)
+
+print(f"\n CatBoost + LightGBM (50/50) ROC-AUC: {blend_auc_50_50:.5f}")
+
+
+
+# 80/20 BLEND
+print(f"\n 80/20 BLEND")
+print("--------------------")
+
+blend_80_20 = (
+    0.8 * cat_predictions +
+    0.2 * lgb_predictions
+)
+
+blend_auc_80_20 = roc_auc_score(
+    Y_test,
+    blend_80_20
+)
+
+print(f"CatBoost + LightGBM (80/20) ROC-AUC: {blend_auc_80_20:.5f}")
+
+
+# COMPARE THE RESULTS
+print(f"\n BLENDING RESULTS")
+print("-------------------------")
+print(f"CatBoost:       {auc_lr03:.5f}")
+print(f"LightGBM:       {lgb_auc:.5f}")
+print(f"Blend 70/30:    {blend_auc_70_30:.5f}")
+print(f"Blend 50/50:    {blend_auc_50_50:.5f}")
+print(f"Blend 80/20:    {blend_auc_80_20:.5f}")
