@@ -13,6 +13,7 @@ from sklearn.pipeline import Pipeline
 
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
+import lightgbm as lgb
 from xgboost import XGBClassifier
 
 
@@ -662,3 +663,90 @@ print(f"CatBoost Depth 8:    {auc_depth8:.5f}")
 print(f"CatBoost LR 0.03:    {auc_lr03:.5f}")
 print(f"Feature Engineering: {auc_fe:.5f}")
 print(f"CatBoost L2=5:       {auc_l2:.5f}")
+
+
+print("\n")
+
+# LIGHTGBM MODEL
+# DEFINE LIGHTGBM FEATURES
+X = train.drop(columns=["Will_Buy_EV", "id"])
+
+Y = train["Will_Buy_EV"].map({
+    "No": 0,
+    "Yes": 1
+})
+
+
+# CONVERT CATEGORICAL FEATURES
+for col in categorical_features:
+    X[col] = X[col].astype("category")
+
+
+# SPLIT TRAIN \ TEST
+# Split Training and Validation Data
+X_train_lgb, X_test_lgb, Y_train_lgb, Y_test_lgb = train_test_split(
+    X,
+    Y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+
+# BUILD THE LIGHTGBM MODEL
+lgb_model = lgb.LGBMClassifier(
+    n_estimators=1000,
+    learning_rate=0.03,
+    num_leaves=31,
+    max_depth=-1,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    random_state=42,
+    objective="binary",
+    metric="auc"
+)
+
+
+# TRAIN THE MODEL
+lgb_model.fit(
+    X_train_lgb,
+    Y_train_lgb,
+    categorical_feature=categorical_features,
+    eval_set=[(X_test_lgb, Y_test_lgb)],
+    callbacks=[
+        lgb.early_stopping(
+            stopping_rounds=100
+        ),
+        lgb.log_evaluation(200)
+    ]
+)
+
+
+
+# MAKE PROBABILITY PREDICTIONS
+lgb_predictions = lgb_model.predict_proba(
+    X_test_lgb
+)[:, 1]
+
+
+# CALCULATE LIGHTGBM WITH ROC-AUC
+lgb_auc = roc_auc_score(
+    Y_test_lgb,
+    lgb_predictions
+)
+
+print(f"\n LightGBM ROC-AUC: {lgb_auc:.5f}")
+
+
+
+# COMPARE LIGHTGBM WITH PREVIOUS MODELS
+print(f"\n MODEL COMPARISON")
+print("-----------------------------")
+print(f"Logistic Regression: {baseline_auc:.5f}")
+print(f"CatBoost 500:        {cat_auc:.5f}")
+print(f"CatBoost 1000:       {auc_1000:.5f}")
+print(f"CatBoost Depth 8:    {auc_depth8:.5f}")
+print(f"Feature Engineering: {auc_fe:.5f}")
+print(f"CatBoost LR 0.03:    {auc_lr03:.5f}")
+print(f"CatBoost L2=5:       {auc_l2:.5f}")
+print(f"LightGBM:            {lgb_auc:.5f}")
