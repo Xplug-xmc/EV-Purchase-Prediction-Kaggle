@@ -3,6 +3,8 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import xgboost as xgb
+
 
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
@@ -927,3 +929,107 @@ std_auc = np.std(fold_scores)
 
 print(f"\nMean ROC-AUC: {mean_auc:.5f}")
 print(f"Std ROC-AUC:  {std_auc:.5f}")
+
+
+print("\n")
+
+#XGBOOST EXPERIMENT
+print(f" XGBOOST EXPERIMENT")
+print("-----------------------------")
+
+# SEPARATE FEATURES AND TARGET
+X = train.drop(columns=["Will_Buy_EV", "id"])
+
+Y = train["Will_Buy_EV"].map({
+    "No": 0,
+    "Yes": 1
+})
+
+
+# ENCODE CATEGORICAL FEATURES
+preprocessor_xgb = ColumnTransformer(
+    transformers=[
+        (
+            "cat",
+            OneHotEncoder(
+                handle_unknown="ignore",
+                sparse_output=False
+            ),
+            categorical_features
+        )
+    ],
+    remainder="passthrough"
+)
+
+
+
+# TRANSFORM FEATURES
+X_encoded = preprocessor_xgb.fit_transform(X)
+
+
+# TRAIN / TEST SPLIT
+
+X_train_xgb, X_test_xgb, Y_train_xgb, Y_test_xgb = train_test_split(
+    X_encoded,
+    Y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+
+
+# BUILD XGBOOST MODEL
+xgb_model = xgb.XGBClassifier(
+    n_estimators=1000,
+    learning_rate=0.03,
+    max_depth=6,
+    subsample=0.8,
+    colsample_bytree=0.8,
+    objective="binary:logistic",
+    eval_metric="auc",
+    random_state=42,
+    n_jobs=-1
+)
+
+
+
+# TRAIN XGBOOST MODEL
+xgb_model.fit(
+    X_train_xgb,
+    Y_train_xgb,
+    eval_set=[
+        (X_test_xgb, Y_test_xgb)
+    ],
+    verbose=200
+)
+
+
+
+# PREDICT PROBABILITIES
+xgb_predictions = xgb_model.predict_proba(X_test_xgb)[:, 1]
+
+
+# CALCULATE ROC-AUC
+
+xgb_auc = roc_auc_score(
+    Y_test_xgb,
+    xgb_predictions
+)
+
+print(f"\n XGBoost ROC-AUC: {xgb_auc:.5f}")
+
+
+# COMPARE THE MODELS
+print(f"\n MODEL COMPARISON")
+print("-----------------------------")
+
+print(f"Logistic Regression: {baseline_auc:.5f}")
+print(f"CatBoost 500:        {cat_auc:.5f}")
+print(f"CatBoost 1000:       {auc_1000:.5f}")
+print(f"CatBoost Depth 8:    {auc_depth8:.5f}")
+print(f"Feature Engineering: {auc_fe:.5f}")
+print(f"CatBoost LR 0.03:    {auc_lr03:.5f}")
+print(f"CatBoost L2=5:       {auc_l2:.5f}")
+print(f"LightGBM:            {lgb_auc:.5f}")
+print(f"XGBoost:             {xgb_auc:.5f}")
