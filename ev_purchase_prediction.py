@@ -10,12 +10,12 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder,OneHotEncoder, StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import StratifiedKFold
 
 from catboost import CatBoostClassifier
 from lightgbm import LGBMClassifier
 import lightgbm as lgb
 from xgboost import XGBClassifier
-
 
 #LOAD THE DATA
 train = pd.read_csv("train.csv")
@@ -819,3 +819,111 @@ print(f"LightGBM:       {lgb_auc:.5f}")
 print(f"Blend 70/30:    {blend_auc_70_30:.5f}")
 print(f"Blend 50/50:    {blend_auc_50_50:.5f}")
 print(f"Blend 80/20:    {blend_auc_80_20:.5f}")
+
+print("\n")
+
+
+# 5-FOLD CROSS-VALIDATION
+print("\n5-FOLD CROSS-VALIDATION")
+print("-------------------------------")
+
+
+# PREPARE THE FEATURES AND TARGET
+x_cv = train.drop(columns=["Will_Buy_EV", "id"])
+
+y_cv = train["Will_Buy_EV"].map({
+    "No": 0,
+    "Yes": 1
+})
+
+
+# CREATE STRATIFIED K-FOLD
+skf = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
+)
+
+
+# CREATE LIST FOR FOLD SCORES
+fold_scores = []
+
+
+# TRAIN AND VALIDATE EACH FOLD
+for fold, (train_idx, valid_idx) in enumerate(
+    skf.split(x_cv, y_cv), start=1
+):
+
+    print(f"\nFold {fold}")
+
+
+    # CREATE TRAINING DATA
+    x_train_cv = x_cv.iloc[train_idx]
+    x_valid_cv = x_cv.iloc[valid_idx]
+
+    # CREATE VALIDATION TARGET
+    y_train_cv = y_cv.iloc[train_idx]
+    y_valid_cv = y_cv.iloc[valid_idx]
+
+
+    # CREATE CATBOOST MODEL
+    model_cv = CatBoostClassifier(
+        iterations=2000,
+        learning_rate=0.03,
+        depth=6,
+        loss_function="Logloss",
+        eval_metric="AUC",
+        random_seed=42,
+        verbose=False
+    )
+
+
+    # TRAIN CATBOOST MODEL
+    model_cv.fit(
+        x_train_cv,
+        y_train_cv,
+        cat_features=categorical_features,
+        eval_set=(x_valid_cv, y_valid_cv),
+        early_stopping_rounds=100,
+        verbose=False
+    )
+
+
+    # MAKE PROBABILITY PREDICTIONS
+    predictions_cv = model_cv.predict_proba(
+        x_valid_cv
+    )[:, 1]
+
+
+    # CALCULATE FOLD ROC-AUC
+    fold_auc = roc_auc_score(
+        y_valid_cv,
+        predictions_cv
+    )
+
+
+    # STORE FOLD SCORE
+    fold_scores.append(fold_auc)
+
+
+    # PRINT FOLD RESULT
+    print(f"Fold {fold}: ROC-AUC = {fold_auc:.5f}")
+
+
+# DISPLAY CROSS-VALIDATION RESULTS
+print("\nCROSS-VALIDATION RESULTS")
+print("-----------------------------")
+
+for i, score in enumerate(fold_scores, start=1):
+    print(f"Fold {i}: {score:.5f}")
+
+
+# CALCULATE MEAN ROC-AUC
+mean_auc = np.mean(fold_scores)
+
+# CALCULATE STANDARD DEVIATION
+std_auc = np.std(fold_scores)
+
+
+print(f"\nMean ROC-AUC: {mean_auc:.5f}")
+print(f"Std ROC-AUC:  {std_auc:.5f}")
