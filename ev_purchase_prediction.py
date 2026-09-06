@@ -1033,3 +1033,123 @@ print(f"CatBoost LR 0.03:    {auc_lr03:.5f}")
 print(f"CatBoost L2=5:       {auc_l2:.5f}")
 print(f"LightGBM:            {lgb_auc:.5f}")
 print(f"XGBoost:             {xgb_auc:.5f}")
+
+
+print("\n")
+
+# 5 - FOLD CROSSM - VALIDATION FOR XGBOOST
+print(f"\n 5-Fold Cross-Validation for XGBoost")
+print("--------------------------------------------")
+
+# PREPARE FEATURES AND TARGET
+X_cv = train.drop(columns=["Will_Buy_EV", "id"])
+
+Y_cv = train["Will_Buy_EV"].map({
+    "No": 0,
+    "Yes": 1
+})
+
+
+# CREATE 5-FOLD STRATIFIED CROSS-VALIDATION
+skf = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
+)
+
+fold_scores_xgb = []
+
+
+
+# RUN 5-FOLD XGBOOST
+for fold, (train_idx, valid_idx) in enumerate(
+    skf.split(X_cv, Y_cv), start=1
+):
+
+    print(f"\nFold {fold}")
+
+
+    #TRAIN / TEST SPLIT
+    X_train_fold = X_cv.iloc[train_idx]
+    X_valid_fold = X_cv.iloc[valid_idx]
+
+    Y_train_fold = Y_cv.iloc[train_idx]
+    Y_valid_fold = Y_cv.iloc[valid_idx]
+
+    # ENCODE CATEGORICAL FEATURES
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False
+                ),
+                categorical_features
+            )
+        ],
+        remainder="passthrough"
+    )
+
+    X_train_encoded = preprocessor.fit_transform(
+        X_train_fold
+    )
+
+    X_valid_encoded = preprocessor.transform(
+        X_valid_fold
+    )
+
+    # BUILD XGBOOST MODEL
+    model = xgb.XGBClassifier(
+        n_estimators=1000,
+        learning_rate=0.03,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="binary:logistic",
+        eval_metric="auc",
+        random_state=42,
+        n_jobs=-1
+    )
+
+    # TRAIN THE MODEL
+    model.fit(
+        X_train_encoded,
+        Y_train_fold,
+        eval_set=[
+            (X_valid_encoded, Y_valid_fold)
+        ],
+        verbose=False
+    )
+
+    # MAKE PROBABILITY PREDICTIONS
+    valid_predictions = model.predict_proba( X_valid_encoded)[:, 1]
+
+    # CALCULATE ROC-AUC
+    fold_auc = roc_auc_score(
+        Y_valid_fold,
+        valid_predictions
+    )
+
+    fold_scores_xgb.append(fold_auc)
+
+    print(f"Fold {fold}: ROC-AUC = {fold_auc:.5f}")
+
+
+
+# CALCULATE CROSS-VALIDATION RESULTS
+print("\nXGBOOST 5-FOLD CROSS-VALIDATION")
+print("------------------------------------")
+
+for i, score in enumerate(
+    fold_scores_xgb,
+    start=1
+):
+    print(f"Fold {i}: {score:.5f}")
+
+
+mean_auc_xgb = np.mean(fold_scores_xgb)
+std_auc_xgb = np.std(fold_scores_xgb)
+
+print(f"\nMean ROC-AUC: {mean_auc_xgb:.5f}")
+print(f"Std ROC-AUC:  {std_auc_xgb:.5f}")
