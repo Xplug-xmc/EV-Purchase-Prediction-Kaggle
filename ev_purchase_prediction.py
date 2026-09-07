@@ -7,7 +7,8 @@ import xgboost as xgb
 
 
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import roc_auc_score,roc_curve
+
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import LabelEncoder,OneHotEncoder, StandardScaler
 from sklearn.linear_model import LogisticRegression
@@ -1153,3 +1154,821 @@ std_auc_xgb = np.std(fold_scores_xgb)
 
 print(f"\nMean ROC-AUC: {mean_auc_xgb:.5f}")
 print(f"Std ROC-AUC:  {std_auc_xgb:.5f}")
+
+
+print("\n")
+
+
+
+# FINAL XGBOOST 5-FOLD VALIDATION
+print(f"FINAL XGBOOST 5-FOLD VALIDATION")
+print("-----------------------------------")
+
+
+# REMOVE UNSUCCESSFUL ENGINEERED FEATURES
+engineered_features = [
+    "Income_Per_Car",
+    "Total_Charging_Access",
+    "Commute_per_Charging",
+    "Income_Environmental_Score"
+]
+
+train = train.drop(
+    columns=engineered_features,
+    errors="ignore"
+)
+
+test = test.drop(
+    columns=engineered_features,
+    errors="ignore"
+)
+
+# PREPARE FEATURES AND TARGET
+X = train.drop(
+    columns=["Will_Buy_EV", "id"])
+
+Y = train["Will_Buy_EV"].map({
+    "No": 0,
+    "Yes": 1})
+
+X_test = test.drop(
+    columns=["id"])
+
+
+# VERIFY FINAL FEATURE COUNT
+print(f"\n Final training feature count:", X.shape[1])
+print("Final training features:")
+print(X.columns.tolist())
+
+
+# CREATE 5-FOLD STRATIFIED CROSS-VALIDATION
+skf = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
+)
+
+
+# CREATE STORAGE FOR OOF PREDICTIONS
+oof_predictions = np.zeros(
+    len(X)
+)
+
+fold_scores = []
+
+fold_models = []
+fold_preprocessors = []
+
+
+
+
+# TRAIN XGBOOST USING 5-FOLD CROSS-VALIDATION
+for fold, (train_idx, valid_idx) in enumerate(
+    skf.split( X , Y ),
+    start=1
+):
+
+    print(f"\n========== FOLD {fold} ==========")
+
+    # SPLIT CURRENT FOLD
+    X_train_fold = X.iloc[train_idx]
+    X_valid_fold = X.iloc[valid_idx]
+
+    Y_train_fold = Y.iloc[train_idx]
+    Y_valid_fold = Y.iloc[valid_idx]
+
+    # CREATE PREPROCESSOR
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False
+                ),
+                categorical_features
+            )
+        ],
+        remainder="passthrough"
+    )
+
+
+    # FIT PREPROCESSOR ON TRAINING FOLD ONLY
+    X_train_encoded = preprocessor.fit_transform(
+        X_train_fold
+    )
+
+    X_valid_encoded = preprocessor.transform(
+        X_valid_fold
+    )
+
+
+    # BUILD XGBOOST MODEL
+    model = xgb.XGBClassifier(
+        n_estimators=1000,
+        learning_rate=0.03,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="binary:logistic",
+        eval_metric="auc",
+        random_state=42,
+        n_jobs=-1
+    )
+
+
+    # TRAIN MODEL
+    model.fit(
+        X_train_encoded,
+        Y_train_fold,
+        eval_set=[
+            (X_valid_encoded, Y_valid_fold)
+        ],
+        verbose=False
+    )
+
+
+    # VALIDATION PROBABILITIES
+    valid_predictions = model.predict_proba(X_valid_encoded)[:, 1]
+
+
+    # SAVE OOF PREDICTIONS
+    oof_predictions[valid_idx] = valid_predictions
+
+
+    # CALCULATE FOLD ROC-AUC
+    fold_auc = roc_auc_score(
+        Y_valid_fold,
+        valid_predictions
+    )
+
+    fold_scores.append(
+        fold_auc
+    )
+
+    print( f"Fold {fold}: ROC-AUC = {fold_auc:.5f}")
+
+
+    # SAVE MODEL AND PREPROCESSOR
+    fold_models.append(model)
+    fold_preprocessors.append(preprocessor)
+
+
+ # CALCULATE OVERALL OOF ROC-AUC
+oof_auc = roc_auc_score(
+    Y,
+    oof_predictions
+)
+
+print(f"\nOVERALL OOF ROC-AUC")
+print("-----------------------------")
+print(f"OOF ROC-AUC: {oof_auc:.5f}")
+
+
+# DISPLAY FOLD PERFORMANCE
+print("\n5-FOLD XGBOOST RESULTS")
+print("-----------------------------")
+
+for i, score in enumerate(
+    fold_scores,
+    start=1
+):
+    print(f"Fold {i}: {score:.5f}")
+
+print(
+    f"\nMean ROC-AUC: "
+    f"{np.mean(fold_scores):.5f}"
+)
+
+print(
+    f"Std ROC-AUC: "
+    f"{np.std(fold_scores):.5f}"
+)
+
+
+# MODEL COMPARISON — SINGLE VALIDATION EXPERIMENTS
+print(f"\n CREATE MODEL COMPARISON DATA")
+print("---------------------------------")
+
+model_results = pd.DataFrame({
+    "Model": [
+        "Logistic Regression",
+        "CatBoost 500",
+        "CatBoost 1000",
+        "CatBoost Depth 8",
+        "CatBoost LR 0.03",
+        "CatBoost L2=5",
+        "LightGBM",
+        "XGBoost"
+    ],
+    "ROC_AUC": [
+        0.93796,
+        0.94110,
+        0.94149,
+        0.94138,
+        0.94158,
+        0.94152,
+        0.94152,
+        0.94162
+    ]
+})
+
+print(model_results)
+
+
+# VISUALIZE MODEL COMPARISON
+model_results_sorted = model_results.sort_values(
+    "ROC_AUC"
+)
+
+plt.figure(figsize=(10, 7))
+
+plt.barh(
+    model_results_sorted["Model"],
+    model_results_sorted["ROC_AUC"]
+)
+
+plt.title("Model ROC-AUC Comparison")
+plt.xlabel("ROC-AUC")
+plt.ylabel("Model")
+plt.grid(axis="x",alpha=0.2)
+plt.show()
+
+
+
+# VISUALIZE 5-FOLD PERFORMANCE
+fold_numbers = range(
+    1,
+    len(fold_scores) + 1
+)
+
+mean_auc = np.mean(fold_scores)
+
+plt.figure(figsize=(9, 6))
+
+plt.plot(
+    fold_numbers,
+    fold_scores,
+    marker="o",
+    linewidth=2,
+    label="Fold ROC-AUC"
+)
+
+plt.axhline(
+    mean_auc,
+    linestyle="--",
+    linewidth=2,
+    label=f"Mean AUC = {mean_auc:.5f}"
+)
+
+plt.title("XGBoost 5-Fold Cross-Validation Performance")
+plt.xlabel("Fold")
+plt.ylabel("ROC-AUC")
+plt.xticks(list(fold_numbers))
+plt.legend()
+plt.grid(alpha=0.2)
+plt.show()
+
+
+# CREATE ROC CURVE
+fpr, tpr, thresholds = roc_curve(
+    Y,
+    oof_predictions
+)
+
+plt.figure(figsize=(9, 7))
+
+plt.plot(
+    fpr,
+    tpr,
+    linewidth=3,
+    label=f"XGBoost AUC = {oof_auc:.5f}"
+)
+
+plt.plot(
+    [0, 1],
+    [0, 1],
+    linestyle="--",
+    linewidth=2,
+    label="Random Guess"
+)
+
+plt.title("XGBoost ROC Curve")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate")
+plt.legend()
+plt.grid(alpha=0.2)
+plt.show()
+
+print(f"\n")
+
+# FEATURE IMPORTANCE
+print(f"\n # FEATURE IMPORTANCE ")
+print("---------------------------")
+
+# GET FEATURE NAMES
+feature_names = (
+    fold_preprocessors[0]
+    .get_feature_names_out()
+)
+
+
+
+# CALCULATE AVERAGE FEATURE IMPORTANCE
+print(f"\n # CALCULATE AVERAGE FEATURE IMPORTANCE")
+print("--------------------------------------------------")
+
+feature_importance_list = []
+
+for model in fold_models:
+
+    feature_importance_list.append(
+        model.feature_importances_
+    )
+
+average_importance = np.mean(
+    feature_importance_list,
+    axis=0
+)
+
+importance_df = pd.DataFrame({
+    "Feature": feature_names,
+    "Importance": average_importance
+})
+
+importance_df = importance_df.sort_values(
+    "Importance",
+    ascending=True
+)
+
+
+
+# VISUALIZE FEATURE IMPORTANCE
+plt.figure(figsize=(10, 8))
+
+plt.barh(
+    importance_df["Feature"],
+    importance_df["Importance"]
+)
+
+plt.title("XGBoost Average Feature Importance")
+plt.xlabel("Importance")
+plt.ylabel("Feature")
+plt.grid(axis="x",alpha=0.2)
+plt.show()
+
+print("\n")
+
+# GENERATE NEW UNSEEN CUSTOMERS
+print(f"\n 13. GENERATE NEW UNSEEN CUSTOMERS")
+print("----------------------------------------")
+
+
+# GENERATE NEW UNSEEN CUSTOMER DATA
+np.random.seed(2026)
+
+n_new = 1000
+
+new_customers = pd.DataFrame({
+
+    "Age": np.random.randint(
+        train["Age"].min(),
+        train["Age"].max() + 1,
+        n_new
+    ),
+
+    "Annual_Income_USD": np.random.uniform(
+        train["Annual_Income_USD"].min(),
+        train["Annual_Income_USD"].max(),
+        n_new
+    ),
+
+    "Daily_Commute_km": np.random.uniform(
+        train["Daily_Commute_km"].min(),
+        train["Daily_Commute_km"].max(),
+        n_new
+    ),
+
+    "Number_of_Cars_Owned": np.random.randint(
+        train["Number_of_Cars_Owned"].min(),
+        train["Number_of_Cars_Owned"].max() + 1,
+        n_new
+    ),
+
+    "Charging_Stations_Near_Home": np.random.randint(
+        train["Charging_Stations_Near_Home"].min(),
+        train["Charging_Stations_Near_Home"].max() + 1,
+        n_new
+    ),
+
+    "Charging_Stations_Near_Work": np.random.randint(
+        train["Charging_Stations_Near_Work"].min(),
+        train["Charging_Stations_Near_Work"].max() + 1,
+        n_new
+    ),
+
+    "Environmental_Concern_Level": np.random.randint(
+        int(train["Environmental_Concern_Level"].min()),
+        int(train["Environmental_Concern_Level"].max()) + 1,
+        n_new
+    ),
+
+    "Gender": np.random.choice(
+        train["Gender"].dropna().unique(),
+        n_new
+    ),
+
+    "City_Type": np.random.choice(
+        train["City_Type"].dropna().unique(),
+        n_new
+    ),
+
+    "Current_Car_Type": np.random.choice(
+        train["Current_Car_Type"].dropna().unique(),
+        n_new
+    ),
+
+    "Home_Charging_Possible": np.random.choice(
+        train["Home_Charging_Possible"].dropna().unique(),
+        n_new
+    ),
+
+    "Subsidy_Available": np.random.choice(
+        train["Subsidy_Available"].dropna().unique(),
+        n_new
+    ),
+
+    "Range_Anxiety_Level": np.random.choice(
+        train["Range_Anxiety_Level"].dropna().unique(),
+        n_new
+    )
+})
+print(f"\n NEW CUSTOMERS")
+print("----------------------")
+
+print(new_customers.head())
+print("Shape:", new_customers.shape)
+
+
+# CHECK UNSEEN CUSTOMER FEATURES
+print("Training features:", X.columns.tolist())
+print("Unseen features:", new_customers.columns.tolist())
+
+assert list(X.columns) == list(new_customers.columns)
+
+
+# PREDICT UNSEEN CUSTOMERS
+print(f"\n PREDICT UNSEEN CUSTOMER PROBABILITIES")
+print("--------------------------------------------")
+
+# PREDICT UNSEEN CUSTOMER PROBABILITIES
+unseen_predictions = []
+
+for model, preprocessor in zip(
+    fold_models,
+    fold_preprocessors
+):
+
+    unseen_encoded = preprocessor.transform(
+        new_customers
+    )
+
+    fold_prediction = model.predict_proba(
+        unseen_encoded
+    )[:, 1]
+
+    unseen_predictions.append(
+        fold_prediction
+    )
+
+
+ # AVERAGE PREDICTIONS FROM ALL FIVE MODELS
+unseen_predictions = np.mean(
+    unseen_predictions,
+    axis=0
+)
+
+# ADD PREDICTIONS TO NEW CUSTOMER DATA
+new_customers[ "EV_Purchase_Probability"] = unseen_predictions
+
+
+# CREATE PREDICTION CATEGORIES
+print(f"\n 15. CREATE PREDICTION CATEGORIES")
+print("------------------------------------------")
+
+new_customers["Prediction_Category"] = pd.cut(
+    new_customers["EV_Purchase_Probability"],
+    bins=[0, 0.25, 0.50, 0.75, 1],
+    labels=[
+        "Low Probability",
+        "Moderate Probability",
+        "High Probability",
+        "Very High Probability"
+    ],
+    include_lowest=True
+)
+
+
+
+# VISUALIZE PREDICTED PROBABILITY DISTRIBUTION
+plt.figure(figsize=(10, 6))
+
+plt.hist(
+    new_customers["EV_Purchase_Probability"],
+    bins=30,
+    density=True,
+    alpha=0.7
+)
+
+mean_probability = (
+    new_customers["EV_Purchase_Probability"].mean()
+)
+
+plt.axvline(
+    mean_probability,
+    linestyle="--",
+    linewidth=2,
+    label=f"Mean = {mean_probability:.3f}"
+)
+
+plt.title("Predicted EV Purchase Probability — Unseen Customers")
+plt.xlabel("Probability of Buying an EV")
+plt.ylabel("Density")
+plt.legend()
+plt.grid(alpha=0.2)
+plt.show()
+
+
+
+# ENVIRONMENTAL CONCERN VS PREDICTION
+plt.figure(figsize=(10, 6))
+
+sns.regplot(
+    data=new_customers,
+    x="Environmental_Concern_Level",
+    y="EV_Purchase_Probability",
+    scatter_kws={
+        "alpha": 0.15
+    },
+    line_kws={
+        "linewidth": 3
+    },
+    order=2
+)
+
+plt.title("Environmental Concern vs Predicted EV Purchase Probability")
+plt.xlabel("Environmental Concern Level")
+plt.ylabel("Predicted Probability")
+plt.grid(alpha=0.2)
+plt.show()
+
+
+
+# INCOME VS PREDICTION
+plt.figure(figsize=(10, 6))
+
+sns.regplot(
+    data=new_customers,
+    x="Annual_Income_USD",
+    y="EV_Purchase_Probability",
+    scatter_kws={
+        "alpha": 0.15
+    },
+    line_kws={
+        "linewidth": 3
+    },
+    order=2
+)
+
+plt.title("Annual Income vs Predicted EV Purchase Probability")
+plt.xlabel("Annual Income (USD)")
+plt.ylabel("Predicted Probability")
+plt.grid(alpha=0.2)
+plt.show()
+
+
+
+# SUBSIDY VS PREDICTION
+plt.figure(figsize=(8, 6))
+
+sns.boxplot(
+    data=new_customers,
+    x="Subsidy_Available",
+    y="EV_Purchase_Probability"
+)
+
+plt.title("Subsidy Availability vs Predicted EV Purchase Probability")
+plt.xlabel("Subsidy Available")
+plt.ylabel("Predicted Probability")
+plt.grid(axis="y",alpha=0.2)
+plt.show()
+
+
+
+# RANGE ANXIETY VS PREDICTION
+plt.figure(figsize=(9, 6))
+
+sns.boxplot(
+    data=new_customers,
+    x="Range_Anxiety_Level",
+    y="EV_Purchase_Probability",
+    order=["Low", "Medium", "High"]
+)
+
+plt.title("Range Anxiety vs Predicted EV Purchase Probability")
+plt.xlabel("Range Anxiety Level")
+plt.ylabel("Predicted Probability")
+plt.grid(axis="y",alpha=0.2)
+plt.show()
+
+# DISPLAY TOP 20 PREDICTED CUSTOMERS
+print(f"\n DISPLAY TOP 20 PREDICTED CUSTOMERS")
+print("-----------------------------------------")
+
+top_customers = new_customers.sort_values(
+    "EV_Purchase_Probability",
+    ascending=False
+).head(20)
+
+print(
+    top_customers[
+        [
+            "Age",
+            "Annual_Income_USD",
+            "Environmental_Concern_Level",
+            "Subsidy_Available",
+            "Range_Anxiety_Level",
+            "Home_Charging_Possible",
+            "EV_Purchase_Probability"
+        ]
+    ]
+)
+
+
+
+# SAVE UNSEEN CUSTOMER PREDICTIONS
+new_customers.to_csv(
+    "unseen_customer_predictions.csv",
+    index=False
+)
+
+print("Unseen customer predictions saved successfully!")
+
+# CREATE STORAGE FOR FINAL TEST PREDICTIONS
+final_test_predictions = np.zeros(
+    len(X_test)
+)
+
+
+# GENERATE 5-FOLD TEST PREDICTIONS
+for model, preprocessor in zip(
+    fold_models,
+    fold_preprocessors
+):
+
+    X_test_encoded = preprocessor.transform(
+        X_test
+    )
+
+    fold_test_prediction = model.predict_proba(
+        X_test_encoded
+    )[:, 1]
+
+    final_test_predictions += (
+        fold_test_prediction /
+        len(fold_models)
+    )
+
+
+# CHECK FINAL TEST PREDICTIONS
+print(f"\n CHECK FINAL TEST PREDICTIONS")
+print("------------------------------------")
+
+print(
+    f"Minimum probability: "
+    f"{final_test_predictions.min():.6f}"
+)
+
+print(
+    f"Maximum probability: "
+    f"{final_test_predictions.max():.6f}"
+)
+
+print(
+    f"Mean probability: "
+    f"{final_test_predictions.mean():.6f}"
+)
+
+
+
+# CHECK TEST PREDICTIONS
+print(f"\n CHECK TEST PREDICTIONS")
+print("-----------------------------")
+
+assert len(final_test_predictions) == len(test)
+assert np.all(
+    (final_test_predictions >= 0) &
+    (final_test_predictions <= 1)
+)
+
+# CREATE KAGGLE SUBMISSION
+print(f"\n CREATE KAGGLE SUBMISSION")
+print("-------------------------------")
+
+submission = pd.DataFrame({
+    "id": test["id"],
+    "Will_Buy_EV": final_test_predictions
+})
+
+
+# VALIDATE SUBMISSION
+print(f"\n VALIDATE SUBMISSION")
+print("----------------------------")
+
+print("Submission shape:")
+print(submission.shape)
+
+print("\nSubmission columns:")
+print(submission.columns.tolist())
+
+print("\nMissing values:")
+print(submission.isnull().sum())
+
+print("\nFirst 5 rows:")
+print(submission.head())
+
+
+# SAVE FINAL KAGGLE SUBMISSION
+submission.to_csv(
+    "submission.csv",
+    index=False
+)
+
+print("submission.csv created successfully!")
+
+
+
+# FINAL SUBMISSION CHECK
+print(f"\n FINAL SUBMISSION CHECK")
+print("----------------------------")
+
+final_check = pd.read_csv(
+    "submission.csv"
+)
+
+print("Rows:", len(final_check))
+
+print(
+    "Columns:",
+    list(final_check.columns)
+)
+
+print("\nMissing values:")
+print(
+    final_check.isnull().sum()
+)
+
+print("\nProbability range:")
+
+print(
+    "Minimum:",
+    final_check["Will_Buy_EV"].min()
+)
+
+print(
+    "Maximum:",
+    final_check["Will_Buy_EV"].max()
+)
+
+print("\nFirst 5 rows:")
+print(final_check.head())
+
+
+
+# VISUALIZE FINAL KAGGLE TEST PREDICTIONS
+plt.figure(figsize=(10, 6))
+
+plt.hist(
+    final_test_predictions,
+    bins=30,
+    density=True,
+    alpha=0.7
+)
+
+mean_test_probability = (
+    final_test_predictions.mean()
+)
+
+plt.axvline(
+    mean_test_probability,
+    linestyle="--",
+    linewidth=2,
+    label=f"Mean = {mean_test_probability:.3f}"
+)
+
+plt.title("Final XGBoost Predictions on Kaggle Test Data")
+plt.xlabel("Predicted Probability of Buying an EV")
+plt.ylabel("Density")
+plt.legend()
+plt.grid(alpha=0.2)
+plt.show()
