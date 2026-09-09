@@ -1898,77 +1898,389 @@ print("\nFirst 5 rows:")
 print(submission.head())
 
 
-# SAVE FINAL KAGGLE SUBMISSION
-submission.to_csv(
-    "submission.csv",
-    index=False
+
+# XGBOOST TUNED CANDIDATE — DEPTH 5
+
+# CREATE 5-FOLD CROSS-VALIDATION
+skf = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
 )
 
-print("submission.csv created successfully!")
+depth5_scores = []
 
 
+# RUN XGBOOST DEPTH 5 CROSS-VALIDATION
+for fold, (train_idx, valid_idx) in enumerate(
+    skf.split(X, Y),
+    start=1
+):
 
-# FINAL SUBMISSION CHECK
-print(f"\n FINAL SUBMISSION CHECK")
-print("----------------------------")
+    print(f"\n========== FOLD {fold} ==========")
 
-final_check = pd.read_csv(
-    "submission.csv"
+    # SPLIT CURRENT FOLD
+    X_train_fold = X.iloc[train_idx]
+    X_valid_fold = X.iloc[valid_idx]
+
+    Y_train_fold = Y.iloc[train_idx]
+    Y_valid_fold = Y.iloc[valid_idx]
+
+
+    # CREATE PREPROCESSOR
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False
+                ),
+                categorical_features
+            )
+        ],
+        remainder="passthrough"
+    )
+
+
+    # FIT PREPROCESSOR ON TRAINING FOLD ONLY
+    X_train_encoded = preprocessor.fit_transform(
+        X_train_fold
+    )
+
+    X_valid_encoded = preprocessor.transform(
+        X_valid_fold
+    )
+
+
+    # CREATE XGBOOST DEPTH 5 MODEL
+    model = xgb.XGBClassifier(
+        n_estimators=1000,
+        learning_rate=0.03,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="binary:logistic",
+        eval_metric="auc",
+        random_state=42,
+        n_jobs=-1
+    )
+
+
+    # TRAIN THE MODEL
+    model.fit(
+        X_train_encoded,
+        Y_train_fold,
+        eval_set=[
+            (X_valid_encoded, Y_valid_fold)
+        ],
+        verbose=False
+    )
+
+
+    # PREDICT VALIDATION PROBABILITIES
+    valid_predictions = model.predict_proba(
+        X_valid_encoded
+    )[:, 1]
+
+
+    # CALCULATE ROC-AUC
+    fold_auc = roc_auc_score(
+        Y_valid_fold,
+        valid_predictions
+    )
+
+    depth5_scores.append(fold_auc)
+
+    print(
+        f"Fold {fold}: ROC-AUC = {fold_auc:.5f}"
+    )
+
+
+# CALCULATE DEPTH 5 RESULTS
+depth5_mean = np.mean(depth5_scores)
+depth5_std = np.std(depth5_scores)
+
+print("\nXGBOOST DEPTH 5 RESULTS")
+print("-----------------------------")
+
+for i, score in enumerate(
+    depth5_scores,
+    start=1
+):
+    print(f"Fold {i}: {score:.5f}")
+
+print(
+    f"\nMean ROC-AUC: {depth5_mean:.5f}"
 )
 
-print("Rows:", len(final_check))
+print(
+    f"Std ROC-AUC: {depth5_std:.5f}"
+)
+
+
+# COMPARE XGBOOST MODELS
+print("\nMODEL COMPARISON")
+print("-----------------------------")
+
+print(
+    f"XGBoost Depth 6: {0.94182:.5f}"
+)
+
+print(
+    f"XGBoost Depth 5: {depth5_mean:.5f}"
+)
+
+print("\n")
+
+
+# SUBMISSION 2 — XGBOOST DEPTH 5
+
+# CREATE 5-FOLD CROSS-VALIDATION
+skf_depth5 = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
+)
+
+
+# CREATE STORAGE FOR TEST PREDICTIONS
+test_predictions_depth5 = np.zeros(
+    len(X_test)
+)
+
+depth5_models = []
+depth5_preprocessors = []
+
+
+# TRAIN 5 XGBOOST DEPTH 5 MODELS
+for fold, (train_idx, valid_idx) in enumerate(
+    skf_depth5.split(X, Y),
+    start=1
+):
+
+    print(f"\n========== SUBMISSION 2 - FOLD {fold} ==========")
+
+
+    # SPLIT CURRENT FOLD
+    X_train_fold = X.iloc[train_idx]
+    X_valid_fold = X.iloc[valid_idx]
+
+    Y_train_fold = Y.iloc[train_idx]
+    Y_valid_fold = Y.iloc[valid_idx]
+
+
+    # CREATE PREPROCESSOR
+    preprocessor = ColumnTransformer(
+        transformers=[
+            (
+                "cat",
+                OneHotEncoder(
+                    handle_unknown="ignore",
+                    sparse_output=False
+                ),
+                categorical_features
+            )
+        ],
+        remainder="passthrough"
+    )
+
+
+    # FIT PREPROCESSOR ON TRAINING FOLD ONLY
+    X_train_encoded = preprocessor.fit_transform(
+        X_train_fold
+    )
+
+    X_valid_encoded = preprocessor.transform(
+        X_valid_fold
+    )
+
+    X_test_encoded = preprocessor.transform(
+        X_test
+    )
+
+
+    # BUILD XGBOOST DEPTH 5 MODEL
+    model = xgb.XGBClassifier(
+        n_estimators=1000,
+        learning_rate=0.03,
+        max_depth=5,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="binary:logistic",
+        eval_metric="auc",
+        random_state=42,
+        n_jobs=-1
+    )
+
+
+    # TRAIN MODEL
+    model.fit(
+        X_train_encoded,
+        Y_train_fold,
+        eval_set=[
+            (X_valid_encoded, Y_valid_fold)
+        ],
+        verbose=False
+    )
+
+
+    # PREDICT TEST PROBABILITIES
+    fold_test_predictions = model.predict_proba(
+        X_test_encoded
+    )[:, 1]
+
+
+    # ADD FOLD PREDICTIONS
+    test_predictions_depth5 += (
+        fold_test_predictions / 5
+    )
+
+
+    # SAVE MODEL AND PREPROCESSOR
+    depth5_models.append(model)
+    depth5_preprocessors.append(preprocessor)
+
+    print(
+        f"Fold {fold} test predictions generated."
+    )
+
+
+# CHECK FINAL TEST PREDICTIONS
+print("\nSUBMISSION 2 PREDICTIONS")
+print("-----------------------------")
+
+print(
+    f"Minimum: "
+    f"{test_predictions_depth5.min():.6f}"
+)
+
+print(
+    f"Maximum: "
+    f"{test_predictions_depth5.max():.6f}"
+)
+
+print(
+    f"Mean: "
+    f"{test_predictions_depth5.mean():.6f}"
+)
+
+
+# VALIDATE PREDICTIONS
+assert len(test_predictions_depth5) == len(test)
+
+assert np.all(
+    (test_predictions_depth5 >= 0) &
+    (test_predictions_depth5 <= 1)
+)
+
+
+# CREATE SUBMISSION 2
+submission_depth5 = pd.DataFrame({
+    "id": test["id"],
+    "Will_Buy_EV": test_predictions_depth5
+})
+
+
+# CHECK SUBMISSION 2
+print("\nSUBMISSION 2 CHECK")
+print("-----------------------------")
+
+print(
+    "Shape:",
+    submission_depth5.shape
+)
 
 print(
     "Columns:",
-    list(final_check.columns)
+    submission_depth5.columns.tolist()
 )
 
 print("\nMissing values:")
-print(
-    final_check.isnull().sum()
-)
-
-print("\nProbability range:")
-
-print(
-    "Minimum:",
-    final_check["Will_Buy_EV"].min()
-)
-
-print(
-    "Maximum:",
-    final_check["Will_Buy_EV"].max()
-)
+print(submission_depth5.isnull().sum())
 
 print("\nFirst 5 rows:")
-print(final_check.head())
+print(submission_depth5.head())
+
+
+# SAVE SUBMISSION 2
+submission_depth5.to_csv(
+    "submission_depth5.csv",
+    index=False
+)
+
+print("\nsubmission_depth5.csv created successfully!")
+
+
+# SAVE FINAL KAGGLE SUBMISSION
+#submission.to_csv(
+#    "submission.csv",
+#    index=False
+#)
+
+#print("submission.csv created successfully!")
+
+
+
+#FINAL SUBMISSION CHECK
+#print(f"\n FINAL SUBMISSION CHECK")
+#print("----------------------------")
+
+#final_check = pd.read_csv(
+#    "submission.csv"
+#)
+
+#print("Rows:", len(final_check))
+
+#print(
+#    "Columns:",
+#    list(final_check.columns)
+#)
+
+#print("\nMissing values:")
+
+#print(final_check.isnull().sum())
+
+#print("\nProbability range:")
+#print(
+#    "Minimum:",
+#    final_check["Will_Buy_EV"].min()
+#)
+
+#print(
+#    "Maximum:",
+#    final_check["Will_Buy_EV"].max()
+#)
+
+#print("\nFirst 5 rows:")
+#print(final_check.head())
 
 
 
 # VISUALIZE FINAL KAGGLE TEST PREDICTIONS
-plt.figure(figsize=(10, 6))
+#plt.figure(figsize=(10, 6))
 
-plt.hist(
-    final_test_predictions,
-    bins=30,
-    density=True,
-    alpha=0.7
-)
+#plt.hist(
+#    final_test_predictions,
+#    bins=30,
+#    density=True,
+#    alpha=0.7
+#)
 
-mean_test_probability = (
-    final_test_predictions.mean()
-)
+#mean_test_probability = (
+#    final_test_predictions.mean()
+#)
 
-plt.axvline(
-    mean_test_probability,
-    linestyle="--",
-    linewidth=2,
-    label=f"Mean = {mean_test_probability:.3f}"
-)
+#plt.axvline(
+#    mean_test_probability,
+#    linestyle="--",
+#    linewidth=2,
+#    label=f"Mean = {mean_test_probability:.3f}"
+#)
 
-plt.title("Final XGBoost Predictions on Kaggle Test Data")
-plt.xlabel("Predicted Probability of Buying an EV")
-plt.ylabel("Density")
-plt.legend()
-plt.grid(alpha=0.2)
-plt.show()
+#plt.title("Final XGBoost Predictions on Kaggle Test Data")
+#plt.xlabel("Predicted Probability of Buying an EV")
+#plt.ylabel("Density")
+#plt.legend()
+#plt.grid(alpha=0.2)
+#plt.show()
